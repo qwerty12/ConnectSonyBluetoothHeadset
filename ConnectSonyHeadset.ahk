@@ -10,24 +10,43 @@ Process, Priority,, A
 
 dev := "WH-1000XM3:"
 
-while ((device := VA_GetDevice(dev . A_Index))) {
-	DisconnectHeadset(device)
-	,ObjRelease(device)
+doRelease := False
+,justDisconnect := False
+,skipReconnect := False
+for n, param in A_Args
+{
+    if (param == "/disconnect")
+		justDisconnect := True
+	else if (param == "/skipreconnect")
+		skipReconnect := True
 }
 
-if (A_Args.Length() >= 1 && A_Args[1] == "/disconnect")
+connectedDevCount := 0
+while ((device := VA_GetDevice(dev . A_Index))) {
+	if (!skipReconnect)
+		DisconnectHeadset(device)
+	else
+		skipReconnect := A_Index
+	ObjRelease(device)
+}
+
+if (justDisconnect)
 	ExitApp
 
-doRelease := False
-
-if (ChangeRadioState(3, 1, True, doRelease))
+if (!skipReconnect || !connectedDevCount)
+{
+	ChangeRadioState(3, 1, True, doRelease)
 	Sleep 1000
 
-while ((device := FindAudDevice(dev . A_Index, False, True, doRelease))) {
-	ConnectHeadset(device, False, doRelease)
-	if (doRelease)
-		ObjRelease(device)
+	while ((device := FindAudDevice(dev . A_Index, False, True, doRelease))) {
+		ConnectHeadset(device, False, doRelease)
+		if (doRelease)
+			ObjRelease(device)
+	}
 }
+
+DisableNoiseCancelling()
+
 ExitApp
 
 ;if (A_ScriptName = "RadioState
@@ -121,8 +140,8 @@ WaitForResult(pASyncAction, ByRef result := 0, retType := "Ptr*", pAsyncComplete
 			if (!fallback_to_polling) {
 				if (DllCall(NumGet(NumGet(pASyncAction+0)+6*A_PtrSize), "Ptr", pASyncAction, "Ptr", pAsyncCompletedHandler) >= 0) { ;::put_Completed
 					r := -1
-					hEvent := AsyncActionCompletedHandler_gethEvent(pAsyncCompletedHandler)
-					dwStart := A_TickCount
+					,hEvent := AsyncActionCompletedHandler_gethEvent(pAsyncCompletedHandler)
+					,dwStart := A_TickCount
 					while ((dwElapsed := A_TickCount - dwStart) < dwTimeoutMs) {
 						if (dwTimeoutMs == 0xFFFFFFFF)
 							dwElapsed := 0
@@ -346,7 +365,7 @@ FindAudDevice(device_desc, capture, unplugged, doRelease := True)
 
 	VA_IMMDeviceEnumerator_EnumAudioEndpoints(deviceEnumerator, !!capture, unplugged ? DEVICE_STATE_UNPLUGGED : DEVICE_STATE_ACTIVE, devices)
 
-    VA_IMMDeviceCollection_GetCount(devices, count)
+    ,VA_IMMDeviceCollection_GetCount(devices, count)
     index := 0
     Loop % count
         if VA_IMMDeviceCollection_Item(devices, A_Index-1, device) = 0
@@ -422,5 +441,28 @@ DisconnectHeadset(device_desc, capture := False)
 	if ((dev := FindAudDevice(device_desc, capture, False))) {
 		DoWork(dev, True)
 		,ObjRelease(dev)
+	}
+}
+
+DisableNoiseCancelling()
+{
+	; From https://github.com/dustbin1415/WinUI-SonyHeadphonesClient
+	hModuleSonyHeadphonesClientDll := DllCall("LoadLibraryW", "WStr", A_ScriptDir . "\SonyHeadphonesClientDll.dll", "Ptr")
+	if (!hModuleSonyHeadphonesClientDll)
+		return
+
+	try {
+		VarSetCapacity(devices, 1180) ;, 0)
+		,DllCall("SonyHeadphonesClientDll.dll\GetDevices", "Str", devices)
+		;if (!StrGet(&devices, 100, "UTF-8"))
+		;	return
+		if (!DllCall("SonyHeadphonesClientDll.dll\ConnectDevice", "Int", 0))
+			return
+		DllCall("SonyHeadphonesClientDll.dll\SetFocusOnVoice", "Int", !DllCall("SonyHeadphonesClientDll.dll\GetFocusOnVoice"))
+		,DllCall("SonyHeadphonesClientDll.dll\SetAmbientSoundControl", "Int", False)
+		,DllCall("SonyHeadphonesClientDll.dll\SetChanges")
+		,DllCall("SonyHeadphonesClientDll.dll\DisConnectDevice")
+	} finally {
+		DllCall("FreeLibrary", "Ptr", hModuleSonyHeadphonesClientDll)
 	}
 }
