@@ -397,11 +397,9 @@ VA_SetDefaultEndpoint(device_desc="playback", role=0)
         return 0
     if VA_IMMDevice_GetId(device, id) = 0
     {
-        ;cfg := ComObjCreate("{294935CE-F637-4E7C-A41B-AB255460B862}"
-        ;                  , "{568b9108-44bf-40b4-9006-86afe5b5a620}")
-        ;hr := VA_xIPolicyConfigVista_SetDefaultEndpoint(cfg, id, role)
-        cfg := IPolicyConfig()
-        hr := VA_xIPolicyConfig_SetDefaultEndpoint(cfg, id, role)
+        cfg := ComObjCreate("{294935CE-F637-4E7C-A41B-AB255460B862}"
+                          , "{568b9108-44bf-40b4-9006-86afe5b5a620}")
+        hr := VA_xIPolicyConfigVista_SetDefaultEndpoint(cfg, id, role)
         ObjRelease(cfg)
     }
     ObjRelease(device)

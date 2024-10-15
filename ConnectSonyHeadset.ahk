@@ -5,10 +5,12 @@ SetBatchLines -1
 ListLines Off
 AutoTrim Off
 ;SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
-#SingleInstance Force
+#SingleInstance Ignore
 Process, Priority,, A
+#Include %A_ScriptDir%\VA.ahk
+#Include *i %A_ScriptDir%\SetBassBoost.ahk
 
-dev := "WH-1000XM3:"
+dev := "WH-1000XM3"
 
 doRelease := False
 ,justDisconnect := False
@@ -22,30 +24,44 @@ for n, param in A_Args
 }
 
 connectedDevCount := 0
-while ((device := VA_GetDevice(dev . A_Index))) {
+while ((device := VA_GetDevice(dev . ":" . A_Index))) {
 	if (!skipReconnect)
 		DisconnectHeadset(device)
 	else
-		skipReconnect := A_Index
+		connectedDevCount := A_Index
 	ObjRelease(device)
 }
 
 if (justDisconnect)
 	ExitApp
 
+conn_device := 0
 if (!skipReconnect || !connectedDevCount)
 {
 	ChangeRadioState(3, 1, True, doRelease)
 	Sleep 1000
 
-	while ((device := FindAudDevice(dev . A_Index, False, True, doRelease))) {
-		ConnectHeadset(device, False, doRelease)
-		if (doRelease)
-			ObjRelease(device)
+	while ((device := FindAudDevice(dev, False, True, True))) {
+		ConnectHeadset(device, False, True)
+		Sleep 400
+		if (VA_IMMDevice_GetState(device, state) >= 0x00 && state == 1) {
+			conn_device := device
+			break
+		}
+		ObjRelease(device)
+		Sleep 600
 	}
 }
 
-DisableNoiseCancelling()
+if (!conn_device)
+	conn_device := VA_GetDevice(dev)
+if (conn_device) {
+	if (IsFunc(sbb:="SetBassBoost"))
+		%sbb%(conn_device, !WinExist("Kodi ahk_class Kodi"))
+	DisableNoiseCancelling()
+	if (doRelease)
+		ObjRelease(conn_device)
+}
 
 ExitApp
 
@@ -59,7 +75,6 @@ ChangeRadioState(radioKind, newState, wait := True, doRelease := True)
 	if ((radioKind < -1 || radioKind > 4) || (newState < 0 || newState > 2))
 		return ret
 
-	; There's a far easier way than this, but it's undocumented
 	if (!(instRadios := ActivateRtClass("Windows.Devices.Radios.Radio", "{5FB6A12E-67CB-46AE-AAE9-65919F86EFF4}"))) ;IRadioStatics
 		return ret
 
@@ -447,22 +462,21 @@ DisconnectHeadset(device_desc, capture := False)
 DisableNoiseCancelling()
 {
 	; From https://github.com/dustbin1415/WinUI-SonyHeadphonesClient
-	hModuleSonyHeadphonesClientDll := DllCall("LoadLibraryW", "WStr", A_ScriptDir . "\SonyHeadphonesClientDll.dll", "Ptr")
-	if (!hModuleSonyHeadphonesClientDll)
-		return
-
-	try {
-		VarSetCapacity(devices, 1180) ;, 0)
-		,DllCall("SonyHeadphonesClientDll.dll\GetDevices", "Str", devices)
-		;if (!StrGet(&devices, 100, "UTF-8"))
-		;	return
-		if (!DllCall("SonyHeadphonesClientDll.dll\ConnectDevice", "Int", 0))
+	static hModSonyHeadphonesClientDll := 0
+	if (!hModSonyHeadphonesClientDll) {
+		hModSonyHeadphonesClientDll := DllCall("LoadLibraryW", "WStr", A_ScriptDir . "\SonyHeadphonesClientDll.dll", "Ptr")
+		if (!hModSonyHeadphonesClientDll)
 			return
-		DllCall("SonyHeadphonesClientDll.dll\SetFocusOnVoice", "Int", !DllCall("SonyHeadphonesClientDll.dll\GetFocusOnVoice"))
-		,DllCall("SonyHeadphonesClientDll.dll\SetAmbientSoundControl", "Int", False)
-		,DllCall("SonyHeadphonesClientDll.dll\SetChanges")
-		,DllCall("SonyHeadphonesClientDll.dll\DisConnectDevice")
-	} finally {
-		DllCall("FreeLibrary", "Ptr", hModuleSonyHeadphonesClientDll)
 	}
+
+	VarSetCapacity(devices, 1180) ;, 0)
+	,DllCall("SonyHeadphonesClientDll.dll\GetDevices", "Str", devices)
+	;if (!StrGet(&devices, 100, "UTF-8"))
+	;	return
+	if (!DllCall("SonyHeadphonesClientDll.dll\ConnectDevice", "Int", 0))
+		return
+	DllCall("SonyHeadphonesClientDll.dll\SetFocusOnVoice", "Int", !DllCall("SonyHeadphonesClientDll.dll\GetFocusOnVoice"))
+	,DllCall("SonyHeadphonesClientDll.dll\SetAmbientSoundControl", "Int", False)
+	,DllCall("SonyHeadphonesClientDll.dll\SetChanges")
+	,DllCall("SonyHeadphonesClientDll.dll\DisConnectDevice")
 }
