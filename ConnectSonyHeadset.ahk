@@ -17,10 +17,12 @@ doRelease := False
 ,skipReconnect := False
 for n, param in A_Args
 {
-    if (param == "/disconnect")
-		justDisconnect := True
-	else if (param == "/skipreconnect")
-		skipReconnect := True
+    if (!justDisconnect && !skipReconnect) {
+		if (param == "/disconnect")
+			justDisconnect := True
+		else if (param == "/skipreconnect")
+			skipReconnect := True
+    }
 }
 
 connectedDevCount := 0
@@ -36,15 +38,16 @@ if (justDisconnect)
 	ExitApp
 
 conn_device := 0
+hModSonyHeadphonesClientDll := DllCall("LoadLibraryW", "WStr", A_ScriptDir . "\SonyHeadphonesClientDll.dll", "Ptr")
 if (!skipReconnect || !connectedDevCount)
 {
 	ChangeRadioState(3, 1, True, doRelease)
 	Sleep 1000
 
 	while ((device := FindAudDevice(dev, False, True, True))) {
-		ConnectHeadset(device, False, True)
+		r := ConnectHeadset(device, False, True)
 		Sleep 400
-		if (VA_IMMDevice_GetState(device, state) >= 0x00 && state == 1) {
+		if (r && VA_IMMDevice_GetState(device, state) >= 0x00 && state == 1) {
 			conn_device := device
 			break
 		}
@@ -53,12 +56,10 @@ if (!skipReconnect || !connectedDevCount)
 	}
 }
 
-if (!conn_device)
-	conn_device := VA_GetDevice(dev)
-if (conn_device) {
+if ((conn_device := conn_device ? conn_device : VA_GetDevice(dev))) {
+	DisableNoiseCancelling()
 	if (IsFunc(sbb:="SetBassBoost"))
 		%sbb%(conn_device, !WinExist("Kodi ahk_class Kodi"))
-	DisableNoiseCancelling()
 	if (doRelease)
 		ObjRelease(conn_device)
 }
@@ -408,6 +409,7 @@ DoWork(dev, disconnect, doRelease := True)
         ,VA_GUID(KSPROPSETID_BtAudio := "{7FA06C40-B8F6-4C7E-8556-E8C33A12E54D}")
 		,NumPut(1, KSPROPSETID_BtAudio, 20, "UInt")
 
+	ret := False
 	if (VA_IMMDevice_Activate(dev, "{2A07407E-6497-4A18-9787-32F79BD0D98F}", 1, 0, dev_topology) == 0) {
 		if (VA_IDeviceTopology_GetConnector(dev_topology, 0, conn) == 0) {
 			if (VA_IConnector_GetConnectedTo(conn, conn_to) == 0) {
@@ -417,7 +419,7 @@ DoWork(dev, disconnect, doRelease := True)
 							if ((adapter_dev := VA_GetDevice(adapter_id))) {
 								if (VA_IMMDevice_Activate(adapter_dev, "{28F54685-06FD-11D2-B27A-00A0C9223196}", 1, 0, KSControl) == 0) {
 									NumPut(disconnect, KSPROPSETID_BtAudio, 16, "UInt")
-									,DllCall(NumGet(NumGet(KSControl+0)+3*A_PtrSize), "Ptr", KSControl, "Ptr", &KSPROPSETID_BtAudio, "UInt", cbKSPROPSETID, "Ptr", 0, "UInt", 0, "Ptr", 0)
+									,ret := DllCall(NumGet(NumGet(KSControl+0)+3*A_PtrSize), "Ptr", KSControl, "Ptr", &KSPROPSETID_BtAudio, "UInt", cbKSPROPSETID, "Ptr", 0, "UInt", 0, "Ptr", 0) >= 0x00
 									if (doRelease)
 										ObjRelease(KSControl)
 								}
@@ -440,15 +442,21 @@ DoWork(dev, disconnect, doRelease := True)
 		if (doRelease)
 			ObjRelease(dev_topology)
 	}
+
+	return ret
 }
 
 ConnectHeadset(device_desc, capture := False, doRelease := True)
 {
+	ret := False
+
 	if ((dev := FindAudDevice(device_desc, capture, True, doRelease))) {
-		DoWork(dev, False, doRelease)
+		ret := DoWork(dev, False, doRelease)
 		if (doRelease)
 			ObjRelease(dev)
 	}
+
+	return ret
 }
 
 DisconnectHeadset(device_desc, capture := False)
@@ -462,12 +470,9 @@ DisconnectHeadset(device_desc, capture := False)
 DisableNoiseCancelling()
 {
 	; From https://github.com/dustbin1415/WinUI-SonyHeadphonesClient
-	static hModSonyHeadphonesClientDll := 0
-	if (!hModSonyHeadphonesClientDll) {
-		hModSonyHeadphonesClientDll := DllCall("LoadLibraryW", "WStr", A_ScriptDir . "\SonyHeadphonesClientDll.dll", "Ptr")
-		if (!hModSonyHeadphonesClientDll)
-			return
-	}
+	global hModSonyHeadphonesClientDll
+	if (!hModSonyHeadphonesClientDll)
+		return
 
 	VarSetCapacity(devices, 1180) ;, 0)
 	,DllCall("SonyHeadphonesClientDll.dll\GetDevices", "Str", devices)
