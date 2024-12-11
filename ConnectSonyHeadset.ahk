@@ -1,6 +1,6 @@
 ﻿#NoEnv  ; Recommended for performance and compatibility with future AutoHotkey releases.
 ; #Warn  ; Enable warnings to assist with detecting common errors.
-;#NoTrayIcon
+#NoTrayIcon
 SetBatchLines -1
 ListLines Off
 AutoTrim Off
@@ -9,6 +9,9 @@ AutoTrim Off
 Process, Priority,, A
 #Include %A_ScriptDir%\VA.ahk
 #Include *i %A_ScriptDir%\SetBassBoost.ahk
+
+if ((runningInActiveSession := DllCall("ProcessIdToSessionId", "UInt", DllCall("GetCurrentProcessId", "UInt"), "UInt*", scriptSessionID) && scriptSessionID == DllCall("WTSGetActiveConsoleSessionId", "UInt")))
+	Menu, Tray, Icon
 
 dev := "WH-1000XM3"
 
@@ -58,8 +61,15 @@ if (!skipReconnect || !connectedDevCount)
 
 if ((conn_device := conn_device ? conn_device : VA_GetDevice(dev))) {
 	DisableNoiseCancelling()
-	if (IsFunc(sbb:="SetBassBoost"))
-		%sbb%(conn_device, !WinExist("Kodi ahk_class Kodi"))
+	if (IsFunc(sbb:="SetBassBoost")) {
+		if (runningInActiveSession) {
+			kodiActive := WinExist("Kodi ahk_class Kodi")
+		} else {
+			Process, Exist, kodi.exe
+			kodiActive := ErrorLevel != 0
+		}
+		%sbb%(conn_device, !kodiActive)
+	}
 	if (doRelease)
 		ObjRelease(conn_device)
 }
